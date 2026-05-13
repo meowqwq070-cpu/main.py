@@ -1,69 +1,44 @@
-import os
-import random
-import requests
-from bs4 import BeautifulSoup
-from datetime import datetime, timedelta, timezone
+# 1. 自動化流程的名稱，會顯示在 GitHub Actions 的左側選單
+name: 5-Minute Stock Monitor
 
-# 1. 設定要隨機抽選的股票清單 (以台股為例，Yahoo Finance 的代號通常加上 .TW)
-STOCK_LIST = ['2330.TW', '2317.TW', '2454.TW', '2308.TW', '2881.TW']
+# 2. 設定觸發條件
+on:
+  schedule:
+    # 設定定時執行，格式為 Cron 語法
+    # '*/5 * * * *' 代表每隔 5 分鐘執行一次
+    - cron: '*/5 * * * *'
+  
+  # 允許手動觸發執行，方便你測試按鈕是否正常
+  workflow_dispatch:
 
-def get_stock_price(ticker):
-    # 使用 Yahoo Finance 美國站的資料，因為其 HTML 結構較為穩定
-    url = f"https://finance.yahoo.com/quote/{ticker}"
-    
-    # 必須加入 User-Agent 偽裝成瀏覽器，否則會被 Yahoo 阻擋
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
-    
-    try:
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Yahoo Finance 目前將股價放在 <fin-streamer> 標籤中
-        price_element = soup.find('fin-streamer', {'data-symbol': ticker, 'data-field': 'regularMarketPrice'})
-        
-        if price_element:
-            return price_element.text
-        else:
-            return "無法解析股價"
-    except Exception as e:
-        return f"爬取失敗: {e}"
+# 3. 具體要執行的工作內容
+jobs:
+  run-bot:
+    # 使用 GitHub 提供的最新版 Ubuntu 虛擬伺服器
+    runs-on: ubuntu-latest
 
-def send_telegram_message(token, chat_id, message):
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        'chat_id': chat_id,
-        'text': message,
-        'parse_mode': 'Markdown'
-    }
-    requests.post(url, data=payload)
+    steps:
+      # 步驟一：將你的程式碼從 GitHub 儲存庫下載到虛擬伺服器中
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-if __name__ == "__main__":
-    # 2. 從環境變數讀取 Telegram 資訊 (稍後會設定在 GitHub Secrets)
-    TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
-    TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
+      # 步驟二：安裝 Python 環境
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
 
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("請先設定 TELEGRAM_TOKEN 與 TELEGRAM_CHAT_ID 環境變數")
-        exit(1)
+      # 步驟三：安裝你在 requirements.txt 裡面寫的套件 (requests, beautifulsoup4)
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
 
-    # 3. 隨機選擇一檔股票並爬取
-    target_stock = random.choice(STOCK_LIST)
-    price = get_stock_price(target_stock)
-    
-    # 4. 取得當前台灣時間 (UTC+8)
-    tz_taipei = timezone(timedelta(hours=8))
-    current_time = datetime.now(tz_taipei).strftime('%Y-%m-%d %H:%M:%S')
-
-    # 5. 組合訊息內容
-    msg = f"📈 **股市定時播報**\n" \
-          f"🕒 時間: {current_time}\n" \
-          f"🎯 股票: `{target_stock}`\n" \
-          f"💰 價格: **{price}**"
-    
-    print("準備發送訊息：\n", msg)
-
-    # 6. 發送到 Telegram
-    send_telegram_message(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, msg)
+      # 步驟四：執行你的 Python 程式碼
+      - name: Run Python script
+        env:
+          # 將你在 GitHub Settings 存好的 Secrets 讀取進來
+          # 這樣 Python 程式碼才能透過 os.environ.get 抓到 Token
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python main.py
